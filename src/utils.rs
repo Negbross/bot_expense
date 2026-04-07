@@ -41,8 +41,6 @@ pub fn get_text(key: &str, user: Option<&User>, name: &str, amount: f64, exchang
         "btn_back" => if is_id { "🔙 Kembali" } else { "🔙 Back" }.to_string(),
         "btn_daily" => if is_id { "📊 Laporan Harian" } else { "📊 Daily Report" }.to_string(),
         "btn_weekly" => if is_id { "📊 Laporan Mingguan" } else { "📊 Weekly Report" }.to_string(),
-        "btn_add" => if is_id { "📝 Tambah Pengeluaran" } else { "📝 Add Expense" }.to_string(),
-        "btn_settings" => if is_id { "⚙️ Pengaturan" } else { "⚙️ Settings" }.to_string(),
         "btn_request" => if is_id { "💬 Chat Administrator" } else { "💬 Contact Admin" }.to_string(),
         
         "report_daily" => if is_id {

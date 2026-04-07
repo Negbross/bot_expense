@@ -274,11 +274,25 @@ async fn message_handler(
             return Ok(());
         }
 
-        match state.repo.add_expense(user.id, parsed.amount, &parsed.description).await {
+        // 1. Jaring Pengaman untuk Nama Barang
+        let safe_item_name = if parsed.item_name.trim().is_empty() {
+            "Tanpa Nama".to_string()
+        } else {
+            parsed.item_name.clone()
+        };
+
+        // 2. Jaring Pengaman untuk Kategori
+        let safe_category = if parsed.category_group.trim().is_empty() {
+            "other".to_string() // Kategori default
+        } else {
+            parsed.category_group.clone()
+        };
+
+        match state.repo.add_expense(user.id, parsed.amount, &parsed.description, &safe_item_name, &safe_category).await {
             Ok(_) => {
                 bot.send_message(
                     msg.chat.id,
-                    format!("Recorded! Item: {}, Amount: Rp {}", parsed.description.trim(), parsed.amount)
+                    format!("Recorded! Item Name: {}, Amount: Rp {}, Category: {}", parsed.item_name.trim(), parsed.amount, parsed.category_group.trim())
                 ).await?;
             }
             Err(e) => {
@@ -365,10 +379,6 @@ async fn callback_handler(
                         vec![
                             InlineKeyboardButton::callback(get_text("btn_daily", Some(&q.from), "", 0.0, state.exchange_rate), "report_daily"),
                             InlineKeyboardButton::callback(get_text("btn_weekly", Some(&q.from), "", 0.0, state.exchange_rate), "report_weekly"),
-                        ],
-                        vec![
-                            InlineKeyboardButton::callback(get_text("btn_add", Some(&q.from), "", 0.0, state.exchange_rate), "add_expense"),
-                            InlineKeyboardButton::callback(get_text("btn_settings", Some(&q.from), "", 0.0, state.exchange_rate), "settings"),
                         ],
                     ];
                     let keyboard = InlineKeyboardMarkup::new(buttons);

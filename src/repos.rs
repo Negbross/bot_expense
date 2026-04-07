@@ -55,9 +55,17 @@ impl Repository {
         Ok(result.rows_affected > 0)
     }
 
-    pub async fn add_expense(&self, user_id: Uuid, amount: f64, description: &str) -> Result<expenses::Model, DbErr> {
+    pub async fn add_expense(&self,
+                             user_id: Uuid,
+                             amount: f64,
+                             description: &str,
+                             item_name: &str,
+                             category_group: &str,
+    ) -> Result<expenses::Model, DbErr> {
         let expense = expenses::ActiveModel {
             id: Set(Uuid::new_v4()),
+            item_name: Set(item_name.to_string()),
+            category_group: Set(category_group.to_string()),
             user_id: Set(user_id),
             amount: Set(amount),
             description: Set(description.to_string()),

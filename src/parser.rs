@@ -18,6 +18,8 @@ pub struct ParsedExpense {
     pub language: String,
     pub amount: f64,
     pub description: String,
+    pub item_name: String,
+    pub category_group: String,
 }
 
 impl ExpenseParser {
@@ -82,6 +84,19 @@ impl ExpenseParser {
         let lang_idx = Self::argmax(lang_data);
         let language = if lang_idx == 0 { "en" } else { "id" };
 
+        let (_, category_data) = outputs[2].try_extract_tensor::<f32>()?;
+        let category_idx = Self::argmax(category_data);
+        let category_group = match category_idx {
+            0 => "entertainment",
+            1 => "food",
+            2 => "transport",
+            3 => "other",
+            4 => "bills",
+            5 => "shopping",
+            6 => "health",
+            _ => "unknown",
+        };
+
         // --- 5 & 6. EKSTRAK NOMINAL & BERSIHKAN DESKRIPSI SECARA DETERMINISTIK ---
         let mut amount = 0.0;
         // LAPIS 1: Translasi Slang Absolut (Indo & English)
@@ -131,7 +146,9 @@ impl ExpenseParser {
             intent: intent.to_string(),
             language: language.to_string(),
             amount,
-            description,
+            description: description.clone(),
+            item_name: description,
+            category_group: category_group.to_string(),
         })
     }
 
