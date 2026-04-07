@@ -7,6 +7,7 @@ use tracing::error;
 
 use crate::repos::Repository;
 use crate::parser::ExpenseParser;
+use crate::utils::get_text;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "These commands are supported:")]
@@ -39,6 +40,9 @@ pub async fn run_bot(repo: Repository, parser: ExpenseParser) {
         .branch(
             dptree::entry()
                 .endpoint(message_handler)
+        ).branch(
+            Update::filter_callback_query()
+                .endpoint(callback_handler) // Arahkan ke fungsi baru kita
         );
 
     Dispatcher::builder(bot, handler)
@@ -75,6 +79,11 @@ async fn command_handler(
                     .as_ref()
                     .map(|f| f.first_name.clone())
                     .unwrap_or_else(|| "pengguna".to_string());
+
+                let lang_code = msg.from
+                    .as_ref()
+                    .and_then(|l| l.language_code.clone())
+                    .unwrap_or_else(|| "en".to_string());
 
                 // 2. Hitung Waktu Awal Bulan Ini (Tanggal 1, Jam 00:00)
                 let now = Utc::now();
@@ -217,6 +226,65 @@ async fn message_handler(
             }
             Err(e) => {
                 bot.send_message(msg.chat.id, format!("Database error: {}", e)).await?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn callback_handler(
+    bot: Bot,
+    q: CallbackQuery,
+    state: Arc<AppState>,
+) -> ResponseResult<()> {
+    // 1. WAJIB: Jawab callback agar ikon loading di tombol Telegram berhenti berputar
+    bot.answer_callback_query(q.id.clone()).await?;
+
+    // Dapatkan data spesifik dari tombol yang ditekan
+    if let Some(data) = q.data.as_ref() {
+        let telegram_id = q.from.id.0;
+
+        let lang_code = q.from.language_code.clone().unwrap_or_else(|| "en".to_string());
+
+        // Ambil user dari database (mirip dengan di command_handler)
+        let user = match state.repo.ensure_user(telegram_id as i64).await {
+            Ok(u) => u,
+            Err(e) => {
+                error!("DB error: {}", e);
+                return Ok(());
+            }
+        };
+
+        // Pastikan pesan tempat tombol itu menempel masih bisa diakses
+        if let Some(msg) = q.regular_message() {
+            let now = Utc::now();
+
+            match data.as_str() {
+                "report_daily" => {
+                    let start_of_day = Utc.with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0).unwrap();
+                    let total = state.repo.get_user_expenses_since(user.id, start_of_day).await.unwrap_or(0.0);
+
+                    let text = get_text("report_daily", &lang_code, "", total);
+                    // Edit pesan dashboard yang lama menjadi hasil laporan
+                    bot.edit_message_text(msg.chat.id, msg.id, text)
+                        .parse_mode(ParseMode::Html)
+                        .await?;
+                }
+                "report_weekly" => {
+                    let start_of_week = now - chrono::Duration::days(7);
+                    let total = state.repo.get_user_expenses_since(user.id, start_of_week).await.unwrap_or(0.0);
+
+                    let text = get_text("report_weekly", &lang_code, "", total);
+                    bot.edit_message_text(msg.chat.id, msg.id, text)
+                        .parse_mode(ParseMode::Html)
+                        .await?;
+                }
+                "add_expense" => {
+                    let text = get_text("add_expense", &lang_code, "", 0.0);
+                    bot.send_message(msg.chat.id, text).await?;
+                }
+                _ => {}
             }
         }
     }
