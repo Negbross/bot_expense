@@ -1,5 +1,5 @@
 use sea_orm_migration::prelude::*;
-use sea_orm_migration::schema::{big_integer, pk_uuid, string, timestamp_with_time_zone, timestamp_with_time_zone_null};
+use sea_orm_migration::schema::{big_integer, pk_uuid, string, string_null, timestamp_with_time_zone, timestamp_with_time_zone_null};
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
@@ -8,6 +8,7 @@ pub struct Migration;
 enum Users {
     Table,
     Id,
+    Username,
     TelegramId,
     IsAdmin,
     IsWhitelisted,
@@ -45,6 +46,7 @@ impl MigrationTrait for Migration {
                     .table(Users::Table)
                     .if_not_exists()
                     .col(ColumnDef::new(Users::Id).uuid().not_null().primary_key().default(Expr::cust("gen_random_uuid()")))
+                    .col(string_null(Users::Username))
                     .col(ColumnDef::new(Users::TelegramId).big_integer().not_null().unique_key())
                     .col(ColumnDef::new(Users::IsAdmin).boolean().not_null().default(false))
                     .col(ColumnDef::new(Users::IsWhitelisted).boolean().not_null().default(false))

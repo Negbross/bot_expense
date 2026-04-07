@@ -7,7 +7,8 @@ use tracing::error;
 
 use crate::repos::Repository;
 use crate::parser::ExpenseParser;
-use crate::utils::get_text;
+use crate::utils::{self, get_text};
+use crate::state::AppState;
 
 #[derive(BotCommands, Clone)]
 #[command(rename_rule = "lowercase", description = "These commands are supported:")]
@@ -15,34 +16,29 @@ pub enum Command {
     #[command(description = "Start the bot and request access.")]
     Start,
     #[command(description = "Admin only: Whitelist a user by telegram ID.")]
-    Whitelist(i64),
+    Whitelist(String),
     #[command(description = "Admin only: Blacklist a user by telegram ID.")]
-    Blacklist(i64),
+    Blacklist(String),
     #[command(description = "Report expenses (e.g. /report daily, /report weekly, /report monthly).")]
     Report(String),
 }
 
-pub struct AppState {
-    pub repo: Repository,
-    pub parser: tokio::sync::Mutex<ExpenseParser>,
-}
-
 pub async fn run_bot(repo: Repository, parser: ExpenseParser) {
     let bot = Bot::from_env();
-    let state = Arc::new(AppState { repo, parser: tokio::sync::Mutex::new(parser) });
+    let live_rate = utils::fetch_exchange_rate().await;
+    let state = Arc::new(AppState { repo, parser: tokio::sync::Mutex::new(parser), exchange_rate: live_rate });
 
-    let handler = Update::filter_message()
+    let handler = dptree::entry()
+        // Cabang Utama 1: Semua yang berupa Pesan Masuk (Teks)
         .branch(
-            dptree::entry()
-                .filter_command::<Command>()
-                .endpoint(command_handler)
+            Update::filter_message()
+                .branch(dptree::entry().filter_command::<Command>().endpoint(command_handler))
+                .branch(dptree::entry().endpoint(message_handler))
         )
+        // Cabang Utama 2: Semua yang berupa Klik Tombol Inline
         .branch(
-            dptree::entry()
-                .endpoint(message_handler)
-        ).branch(
             Update::filter_callback_query()
-                .endpoint(callback_handler) // Arahkan ke fungsi baru kita
+                .endpoint(callback_handler) 
         );
 
     Dispatcher::builder(bot, handler)
@@ -61,11 +57,14 @@ async fn command_handler(
 ) -> ResponseResult<()> {
     let telegram_id = msg.chat.id.0;
     
-    // Ensure user exists in our DB
-    let user = match state.repo.ensure_user(telegram_id).await {
+    // Ambil username si pengirim pesan (bisa None kalau dia gak pasang username di Telegram)
+    let current_username = msg.from.as_ref().and_then(|u| u.username.clone())
+        .unwrap_or("".to_string());
+    
+    // Lempar username ke repo agar disimpan/di-update
+    let user = match state.repo.ensure_user(telegram_id, &current_username).await {
         Ok(u) => u,
-        Err(e) => {
-            error!("DB error ensuring user: {}", e);
+        Err(_) => {
             bot.send_message(msg.chat.id, "Internal database error.").await?;
             return Ok(());
         }
@@ -80,11 +79,6 @@ async fn command_handler(
                     .map(|f| f.first_name.clone())
                     .unwrap_or_else(|| "pengguna".to_string());
 
-                let lang_code = msg.from
-                    .as_ref()
-                    .and_then(|l| l.language_code.clone())
-                    .unwrap_or_else(|| "en".to_string());
-
                 // 2. Hitung Waktu Awal Bulan Ini (Tanggal 1, Jam 00:00)
                 let now = Utc::now();
                 let start_of_month = Utc.with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
@@ -98,12 +92,8 @@ async fn command_handler(
                 // 4. Buat Tombol Inline (Menu)
                 let buttons = vec![
                     vec![
-                        InlineKeyboardButton::callback("📊 Laporan Harian", "report_daily"),
-                        InlineKeyboardButton::callback("📊 Laporan Mingguan", "report_weekly"),
-                    ],
-                    vec![
-                        InlineKeyboardButton::callback("📝 Tambah Pengeluaran", "add_expense"),
-                        InlineKeyboardButton::callback("⚙️ Pengaturan", "settings"),
+                        InlineKeyboardButton::callback(get_text("btn_daily", msg.from.as_ref(), "", 0.0, state.exchange_rate), "report_daily"),
+                        InlineKeyboardButton::callback(get_text("btn_weekly", msg.from.as_ref(), "", 0.0, state.exchange_rate), "report_weekly"),
                     ],
                 ];
                 let keyboard = InlineKeyboardMarkup::new(buttons);
@@ -122,36 +112,103 @@ async fn command_handler(
                     .await?;
 
             } else {
-                bot.send_message(msg.chat.id, "Welcome! You are not whitelisted yet. Please contact the administrator.").await?;
+                // 1. Ambil teks penolakan dari kamus
+                let text = get_text("not_whitelisted", msg.from.as_ref(), "", 0.0, state.exchange_rate);
+                
+                // 2. Buat URL menuju akun Telegram pribadimu
+                // PENTING: Ganti "username_kamu" dengan username Telegram aslimu TANPA tanda @
+                if let Ok(url) = reqwest::Url::parse("https://t.me/miesub") {
+                    
+                    // 3. Rangkai tombol URL
+                    let keyboard = InlineKeyboardMarkup::new(vec![vec![
+                        InlineKeyboardButton::url(
+                            get_text("btn_request", msg.from.as_ref(), "", 0.0, state.exchange_rate), 
+                            url
+                        )
+                    ]]);
+
+                    // 4. Kirim pesan beserta tombolnya
+                    bot.send_message(msg.chat.id, text)
+                        .reply_markup(keyboard)
+                        .parse_mode(ParseMode::Html)
+                        .await?;
+                        
+                } else {
+                    // Fallback aman jika URL gagal di-parse (hanya kirim teks)
+                    bot.send_message(msg.chat.id, text)
+                        .parse_mode(ParseMode::Html)
+                        .await?;
+                }
             }
         }
-        Command::Whitelist(id_to_whitelist) => {
+        Command::Whitelist(target) => {
             if !user.is_admin {
                 bot.send_message(msg.chat.id, "You are not authorized to use this command.").await?;
                 return Ok(());
             }
-            match state.repo.ensure_user(id_to_whitelist).await {
-                Ok(_) => {
-                    if let Err(e) = state.repo.set_whitelist(id_to_whitelist, true).await {
-                        bot.send_message(msg.chat.id, format!("Failed: {}", e)).await?;
-                    } else {
-                        bot.send_message(msg.chat.id, format!("User {} is now whitelisted.", id_to_whitelist)).await?;
+           // Coba ubah input menjadi angka murni (i64)
+            if let Ok(target_id) = target.parse::<i64>() {
+                
+                // JALUR 1: ADMIN MENGGUNAKAN TELEGRAM ID (Angka)
+                match state.repo.set_whitelist(target_id, true).await {
+                    Ok(_) => {
+                        bot.send_message(msg.chat.id, format!("Berhasil! User ID {} sekarang di-whitelist.", target_id)).await?;
+                    }
+                    Err(e) => {
+                        bot.send_message(msg.chat.id, format!("Error database: {}", e)).await?;
                     }
                 }
-                Err(e) => {
-                    bot.send_message(msg.chat.id, format!("Error finding user: {}", e)).await?;
+
+            } else {
+                
+                // JALUR 2: ADMIN MENGGUNAKAN USERNAME (Ada huruf/simbol)
+                let clean_username = target.trim_start_matches('@');
+                match state.repo.set_whitelist_by_username(clean_username, true).await {
+                    Ok(true) => {
+                        bot.send_message(msg.chat.id, format!("Berhasil! User @{} sekarang di-whitelist.", clean_username)).await?;
+                    }
+                    Ok(false) => {
+                        bot.send_message(msg.chat.id, format!("Gagal. User @{} tidak ditemukan di database. Pastikan ia sudah menekan /start.", clean_username)).await?;
+                    }
+                    Err(e) => {
+                        bot.send_message(msg.chat.id, format!("Error database: {}", e)).await?;
+                    }
                 }
             }
         }
-        Command::Blacklist(id_to_blacklist) => {
+        Command::Blacklist(target) => {
             if !user.is_admin {
                 bot.send_message(msg.chat.id, "You are not authorized to use this command.").await?;
                 return Ok(());
             }
-            if let Err(e) = state.repo.set_whitelist(id_to_blacklist, false).await {
-                bot.send_message(msg.chat.id, format!("Failed: {}", e)).await?;
+            // Coba ubah input menjadi angka murni (i64)
+            if let Ok(target_id) = target.parse::<i64>() {
+                
+                // JALUR 1: ADMIN MENGGUNAKAN TELEGRAM ID (Angka)
+                match state.repo.set_whitelist(target_id, false).await {
+                    Ok(_) => {
+                        bot.send_message(msg.chat.id, format!("Berhasil! User ID {} sekarang di-blacklist.", target_id)).await?;
+                    }
+                    Err(e) => {
+                        bot.send_message(msg.chat.id, format!("Error database: {}", e)).await?;
+                    }
+                }
+
             } else {
-                bot.send_message(msg.chat.id, format!("User {} is now blacklisted.", id_to_blacklist)).await?;
+                
+                // JALUR 2: ADMIN MENGGUNAKAN USERNAME (Ada huruf/simbol)
+                let clean_username = target.trim_start_matches('@');
+                match state.repo.set_whitelist_by_username(clean_username, false).await {
+                    Ok(true) => {
+                        bot.send_message(msg.chat.id, format!("Berhasil! User @{} sekarang di-blacklist.", clean_username)).await?;
+                    }
+                    Ok(false) => {
+                        bot.send_message(msg.chat.id, format!("Gagal. User @{} tidak ditemukan di database. Pastikan orang tersebut sudah mengeklik /start ke bot ini minimal 1 kali.", clean_username)).await?;
+                    }
+                    Err(e) => {
+                        bot.send_message(msg.chat.id, format!("Error database: {}", e)).await?;
+                    }
+                }
             }
         }
         Command::Report(period) => {
@@ -191,7 +248,7 @@ async fn message_handler(
 ) -> ResponseResult<()> {
     let telegram_id = msg.chat.id.0;
     
-    let user = match state.repo.ensure_user(telegram_id).await {
+    let user = match state.repo.ensure_user(telegram_id, &msg.from.as_ref().and_then(|u| u.username.clone()).unwrap_or("".to_string())).await {
         Ok(u) => u,
         Err(_) => return Ok(()),
     };
@@ -245,10 +302,8 @@ async fn callback_handler(
     if let Some(data) = q.data.as_ref() {
         let telegram_id = q.from.id.0;
 
-        let lang_code = q.from.language_code.clone().unwrap_or_else(|| "en".to_string());
-
         // Ambil user dari database (mirip dengan di command_handler)
-        let user = match state.repo.ensure_user(telegram_id as i64).await {
+        let user = match state.repo.ensure_user(telegram_id as i64, &q.from.username.clone().unwrap_or("".to_string())).await {
             Ok(u) => u,
             Err(e) => {
                 error!("DB error: {}", e);
@@ -256,33 +311,73 @@ async fn callback_handler(
             }
         };
 
+        
+
         // Pastikan pesan tempat tombol itu menempel masih bisa diakses
         if let Some(msg) = q.regular_message() {
             let now = Utc::now();
+
+            let back_button = vec![vec![InlineKeyboardButton::callback(
+                get_text("btn_back", Some(&q.from), "", 0.0, state.exchange_rate),
+                "back_to_dashboard",
+            )]];
+            let back_keyboard = InlineKeyboardMarkup::new(back_button);
 
             match data.as_str() {
                 "report_daily" => {
                     let start_of_day = Utc.with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0).unwrap();
                     let total = state.repo.get_user_expenses_since(user.id, start_of_day).await.unwrap_or(0.0);
 
-                    let text = get_text("report_daily", &lang_code, "", total);
+                    let text = get_text("report_daily", msg.from.as_ref(), "", total, state.exchange_rate);
                     // Edit pesan dashboard yang lama menjadi hasil laporan
                     bot.edit_message_text(msg.chat.id, msg.id, text)
                         .parse_mode(ParseMode::Html)
+                        .reply_markup(back_keyboard)
                         .await?;
                 }
                 "report_weekly" => {
                     let start_of_week = now - chrono::Duration::days(7);
                     let total = state.repo.get_user_expenses_since(user.id, start_of_week).await.unwrap_or(0.0);
 
-                    let text = get_text("report_weekly", &lang_code, "", total);
+                    let text = get_text("report_weekly", msg.from.as_ref(), "", total, state.exchange_rate);
                     bot.edit_message_text(msg.chat.id, msg.id, text)
                         .parse_mode(ParseMode::Html)
+                        .reply_markup(back_keyboard)
                         .await?;
                 }
-                "add_expense" => {
-                    let text = get_text("add_expense", &lang_code, "", 0.0);
-                    bot.send_message(msg.chat.id, text).await?;
+                "report_monthly" => {
+                    let start_of_month = Utc.with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0).unwrap();
+                    let total = state.repo.get_user_expenses_since(user.id, start_of_month).await.unwrap_or(0.0);
+
+                    let text = get_text("report_monthly", msg.from.as_ref(), "", total, state.exchange_rate);
+                    bot.edit_message_text(msg.chat.id, msg.id, text)
+                        .parse_mode(ParseMode::Html)
+                        .reply_markup(back_keyboard)
+                        .await?;
+                }
+                "back_to_dashboard" => {
+                    let first_name = q.from.first_name.clone();
+                    let start_of_month = Utc.with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0).unwrap();
+                    let monthly_total = state.repo.get_user_expenses_since(user.id, start_of_month).await.unwrap_or(0.0);
+
+                    // Panggil ulang semua tombol menu utama
+                    let buttons = vec![
+                        vec![
+                            InlineKeyboardButton::callback(get_text("btn_daily", Some(&q.from), "", 0.0, state.exchange_rate), "report_daily"),
+                            InlineKeyboardButton::callback(get_text("btn_weekly", Some(&q.from), "", 0.0, state.exchange_rate), "report_weekly"),
+                        ],
+                        vec![
+                            InlineKeyboardButton::callback(get_text("btn_add", Some(&q.from), "", 0.0, state.exchange_rate), "add_expense"),
+                            InlineKeyboardButton::callback(get_text("btn_settings", Some(&q.from), "", 0.0, state.exchange_rate), "settings"),
+                        ],
+                    ];
+                    let keyboard = InlineKeyboardMarkup::new(buttons);
+                    let text = get_text("dashboard_text", Some(&q.from), &first_name, monthly_total, state.exchange_rate);
+
+                    bot.edit_message_text(msg.chat.id, msg.id, text)
+                        .reply_markup(keyboard)
+                        .parse_mode(ParseMode::Html)
+                        .await?;
                 }
                 _ => {}
             }

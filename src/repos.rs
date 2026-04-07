@@ -13,7 +13,7 @@ impl Repository {
         Self { db }
     }
 
-    pub async fn ensure_user(&self, telegram_id: i64) -> Result<users::Model, DbErr> {
+    pub async fn ensure_user(&self, telegram_id: i64, username: &str) -> Result<users::Model, DbErr> {
         // Find existing
         let existing_user = users::Entity::find()
             .filter(users::Column::TelegramId.eq(telegram_id))
@@ -28,6 +28,7 @@ impl Repository {
         let new_user = users::ActiveModel {
             id: Set(Uuid::new_v4()),
             telegram_id: Set(telegram_id),
+            username: Set(Some(username.to_string())),
             ..Default::default()
         }
         .insert(&self.db)
@@ -43,6 +44,15 @@ impl Repository {
             .exec(&self.db)
             .await?;
         Ok(())
+    }
+
+    pub async fn set_whitelist_by_username(&self, username: &str, status: bool) -> Result<bool, DbErr> {
+        let result = users::Entity::update_many()
+            .col_expr(users::Column::IsWhitelisted, Expr::value(status))
+            .filter(users::Column::Username.eq(username))
+            .exec(&self.db)
+            .await?;
+        Ok(result.rows_affected > 0)
     }
 
     pub async fn add_expense(&self, user_id: Uuid, amount: f64, description: &str) -> Result<expenses::Model, DbErr> {
