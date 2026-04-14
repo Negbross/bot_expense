@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # SERVICE 1: Database PostgreSQL
+  # ==========================================
+  db:
+    image: postgres:15-alpine
+    container_name: expense_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      # Data database akan disimpan di memori permanen Docker/Podman
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # Opsional: Buka port ini HANYA ke localhost agar kamu bisa cek
+      # database pakai DBeaver/DataGrip dari dalam server jika perlu
+      - "127.0.0.1:5432:5432"
+
+  # ==========================================
+  # SERVICE 2: Bot Telegram Rust
+  # ==========================================
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: expense_bot
+    restart: unless-stopped
+    environment:
+      # Ambil token dari file .env
+      TELOXIDE_TOKEN: ${TELOXIDE_TOKEN}
+      # URL Database dinamis yang langsung mengarah ke nama service "db"
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+    volumes:
+      # Trik Rahasia: Mount folder assets agar model AI bisa di-update tanpa rebuild!
+      - ./assets:/app/assets
+    depends_on:
+      - db
+
+# Deklarasi volume permanen untuk database
+volumes:
+  pgdata:
