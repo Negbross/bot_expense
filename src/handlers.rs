@@ -95,15 +95,23 @@ async fn command_handler(
                         InlineKeyboardButton::callback(get_text("btn_daily", msg.from.as_ref(), "", 0.0, state.exchange_rate), "report_daily"),
                         InlineKeyboardButton::callback(get_text("btn_weekly", msg.from.as_ref(), "", 0.0, state.exchange_rate), "report_weekly"),
                     ],
+                    vec![
+                        InlineKeyboardButton::url(
+                            "📝 Feedback",
+                            reqwest::Url::parse("https://subbarscrap.my.id")
+                                .unwrap()
+                        )
+                    ]
                 ];
                 let keyboard = InlineKeyboardMarkup::new(buttons);
 
                 // 5. Rangkai Pesan Dashboard dengan Format HTML
-                let text = format!(
-                    "Halo, <b>{}</b>! Selamat datang di Dashboard Keuanganmu.\n\n\
-                    💰 <b>Total Pengeluaran Bulan Ini:</b> Rp {:.2}\n\n\
-                    Apa yang ingin kamu pantau hari ini?",
-                    first_name, monthly_total
+                let text = get_text(
+                    "dashboard_text",
+                    msg.from.as_ref(),
+                    first_name.as_str(),
+                    monthly_total,
+                    state.exchange_rate,
                 );
 
                 bot.send_message(msg.chat.id, text)
@@ -116,7 +124,6 @@ async fn command_handler(
                 let text = get_text("not_whitelisted", msg.from.as_ref(), "", 0.0, state.exchange_rate);
                 
                 // 2. Buat URL menuju akun Telegram pribadimu
-                // PENTING: Ganti "username_kamu" dengan username Telegram aslimu TANPA tanda @
                 if let Ok(url) = reqwest::Url::parse("https://t.me/miesub") {
                     
                     // 3. Rangkai tombol URL
@@ -369,17 +376,26 @@ async fn callback_handler(
                         .reply_markup(back_keyboard)
                         .await?;
                 }
+                "feedback" => {
+
+                }
                 "back_to_dashboard" => {
                     let first_name = q.from.first_name.clone();
                     let start_of_month = Utc.with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0).unwrap();
                     let monthly_total = state.repo.get_user_expenses_since(user.id, start_of_month).await.unwrap_or(0.0);
 
-                    // Panggil ulang semua tombol menu utama
                     let buttons = vec![
                         vec![
                             InlineKeyboardButton::callback(get_text("btn_daily", Some(&q.from), "", 0.0, state.exchange_rate), "report_daily"),
                             InlineKeyboardButton::callback(get_text("btn_weekly", Some(&q.from), "", 0.0, state.exchange_rate), "report_weekly"),
                         ],
+                        vec![
+                            InlineKeyboardButton::url(
+                                "📝 Feedback",
+                                reqwest::Url::parse("https://subbarscrap.my.id")
+                                    .unwrap()
+                            )
+                        ]
                     ];
                     let keyboard = InlineKeyboardMarkup::new(buttons);
                     let text = get_text("dashboard_text", Some(&q.from), &first_name, monthly_total, state.exchange_rate);

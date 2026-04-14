@@ -27,21 +27,21 @@ pub fn get_text(key: &str, user: Option<&User>, name: &str, amount: f64, exchang
         "dashboard_text" => if is_id {
             format!(
                 "Halo, <b>{}</b>! Selamat datang di Dashboard Keuanganmu.\n\n\
-                💰 <b>Total Pengeluaran Bulan Ini:</b> Rp {:.2}\n\n\
-                Apa yang ingin kamu pantau hari ini?", name, amount
+                💰 <b>Total Pengeluaran Bulan Ini:</b> {}\n\n\
+                Apa yang ingin kamu pantau hari ini?", name, formatted_money
             )
         } else {
             format!(
                 "Hello, <b>{}</b>! Welcome to your Financial Dashboard.\n\n\
-                💰 <b>Total Expenses This Month:</b> Rp {:.2}\n\n\
-                What would you like to track today?", name, amount
+                💰 <b>Total Expenses This Month:</b> {}\n\n\
+                What would you like to track today?", name, formatted_money
             )
         },
         // Tombol-tombol menu
         "btn_back" => if is_id { "🔙 Kembali" } else { "🔙 Back" }.to_string(),
         "btn_daily" => if is_id { "📊 Laporan Harian" } else { "📊 Daily Report" }.to_string(),
         "btn_weekly" => if is_id { "📊 Laporan Mingguan" } else { "📊 Weekly Report" }.to_string(),
-        "btn_request" => if is_id { "💬 Chat Administrator" } else { "💬 Contact Admin" }.to_string(),
+        "btn_request" => if is_id { "💬 Chat Admin" } else { "💬 Contact Admin" }.to_string(),
         
         "report_daily" => if is_id {
             format!("📊 <b>Laporan Harian</b>\n\nTotal Pengeluaran: {}", formatted_money)

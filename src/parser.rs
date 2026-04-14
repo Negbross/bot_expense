@@ -141,7 +141,6 @@ impl ExpenseParser {
             amount = 0.0;
         }
 
-        // KEMBALIKAN DATA ASLI (BUKAN DUMMY LAGI)
         Ok(ParsedExpense {
             intent: intent.to_string(),
             language: language.to_string(),
