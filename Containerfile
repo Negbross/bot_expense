@@ -1,7 +1,7 @@
 # ==========================================
 # STAGE 1: Chef (Instalasi Alat)
 # ==========================================
-FROM rust:1.74-slim-bookworm AS chef
+FROM rust:1.85-slim-bookworm AS chef
 WORKDIR /app
 
 # Install dependensi sistem yang dibutuhkan crate (reqwest, ort, dll)
@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cargo-chef
-RUN cargo install cargo-chef --version 0.1.67
+RUN cargo install cargo-chef
 
 # ==========================================
 # STAGE 2: Planner (Menghitung Resep)
