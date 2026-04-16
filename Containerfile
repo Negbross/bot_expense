@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install cargo-chef
-RUN cargo install cargo-chef
+RUN cargo install cargo-chef --version 0.1.67
 
 # ==========================================
 # STAGE 2: Planner (Menghitung Resep)
