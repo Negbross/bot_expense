@@ -4,6 +4,8 @@
 FROM ubuntu:24.04 AS chef
 WORKDIR /app
 
+RUN sed -i 's/archive.ubuntu.com/id.archive.ubuntu.com/g' /etc/apt/sources.list.d/ubuntu.sources
+
 # Install compiler C++, pkg-config, OpenSSL, dan curl
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     curl \
@@ -40,6 +42,8 @@ RUN cargo build --release
 # ==========================================
 FROM ubuntu:24.04 AS runtime
 WORKDIR /app
+
+RUN sed -i 's/archive.ubuntu.com/id.archive.ubuntu.com/g' /etc/apt/sources.list.d/ubuntu.sources
 
 # Install sertifikat internet dan OpenSSL
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
