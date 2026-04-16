@@ -1,7 +1,7 @@
 # ==========================================
 # STAGE 1: Chef (Instalasi Alat)
 # ==========================================
-FROM rust:1.84-slim-bookworm AS chef
+FROM rust:1.74-slim-bookworm AS chef
 WORKDIR /app
 
 # Install dependensi sistem yang dibutuhkan crate (reqwest, ort, dll)
