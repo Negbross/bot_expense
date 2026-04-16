@@ -1,17 +1,21 @@
 # ==========================================
-# STAGE 1: Chef (Instalasi Alat)
+# STAGE 1: Chef (Instalasi Alat di OS Baru)
 # ==========================================
-FROM rust:1.88-bookworm AS chef
+FROM ubuntu:24.04 AS chef
 WORKDIR /app
 
-# Install dependensi sistem yang dibutuhkan crate (reqwest, ort, dll)
-RUN apt-get update && apt-get install -y \
+# Install compiler C++, pkg-config, OpenSSL, dan curl
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    curl \
+    build-essential \
     pkg-config \
     libssl-dev \
-    g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Install cargo-chef
+# Install Rust & Cargo terbaru secara otomatis
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
+
 RUN cargo install cargo-chef
 
 # ==========================================
@@ -19,7 +23,6 @@ RUN cargo install cargo-chef
 # ==========================================
 FROM chef AS planner
 COPY . .
-# Membaca Cargo.toml dan membuat daftar presisi dari semua dependensi
 RUN cargo chef prepare --recipe-path recipe.json
 
 # ==========================================
@@ -27,34 +30,27 @@ RUN cargo chef prepare --recipe-path recipe.json
 # ==========================================
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
-
-# Build DEPENDENSI saja. Layer ini akan di-cache permanen oleh Podman
-# selama kamu tidak mengubah Cargo.toml atau Cargo.lock
 RUN cargo chef cook --release --recipe-path recipe.json
 
-# Baru salin kode sumber Rust milikmu (src/, assets/, migrations/)
 COPY . .
-
-# Build aplikasi utama (sekarang sangat cepat karena dependensi sudah di-cache)
 RUN cargo build --release
 
 # ==========================================
-# STAGE 4: Runtime (Image Produksi Super Ringan)
+# STAGE 4: Runtime (Lingkungan Produksi Ubuntu)
 # ==========================================
-FROM debian:bookworm-slim AS runtime
+FROM ubuntu:24.04 AS runtime
 WORKDIR /app
 
-# Install dependensi runtime agar bot bisa mengakses internet (HTTPS)
-RUN apt-get update && apt-get install -y \
+# Install sertifikat internet dan OpenSSL
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
     ca-certificates \
-    libssl3 \
+    openssl \
     && rm -rf /var/lib/apt/lists/*
 
-# Pindahkan file binary yang sudah jadi ke lingkungan produksi
-COPY --from=builder /app/target/release/my_expense_bot /usr/local/bin/my_expense_bot
+# Salin binary bot_expense yang sudah jadi
+COPY --from=builder /app/target/release/bot_expense /usr/local/bin/bot_expense
 
-# Pindahkan model AI ONNX agar bisa dibaca oleh bot
+# Salin folder AI
 COPY --from=builder /app/assets /app/assets
 
-# Jalankan bot
-CMD ["my_expense_bot"]
+CMD ["bot_expense"]
